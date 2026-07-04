@@ -1,0 +1,607 @@
+<!doctype html>
+<!-- Generated from: "pytest issue #13669 (CVE-2025-71176) — explore potential solutions with tradeoffs, considerations, best practices; visualize only, no implementation" -->
+<!-- Anchors: Residual gaps after 9.0.3, Constraints a bridge must satisfy, Approaches A–D compared, Discovery/GC command as enabling layer, Staged-bridge recommendation, Best practices & prior art -->
+<!-- Input: design-space comparison; layout: attribute-rows × approach-columns + narrative sections -->
+<html lang="en" dir="auto">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>pytest #13669 — tmp_path base-directory solution space</title>
+  <style>
+      :root {
+          --bg: #0f1115;
+          --fg: #e8ecf1;
+          --muted: #9aa3af;
+
+          --accent: #7cc4ff;
+          --card: #1e2330;
+          --ring: #ffd866;
+          --border: #2a3040;
+          --ok: #57d38c;
+          --warn: #e3b341;
+          --bad: #ff7b72;
+          --radius: 14px;
+          --pad: clamp(16px, 3vw, 28px);
+      }
+
+      @media (prefers-color-scheme: light) {
+          /* Dark-mode --accent/--ring/status colors fail on white — re-picked per scheme. */
+          :root {
+              --bg: #fafaf7;
+              --fg: #141821;
+              --muted: #525863;
+              --card: #ffffff;
+              --accent: #0057b3;
+              --ring: #b45309;
+              --border: #e2e5ec;
+              --ok: #116329;
+              --warn: #7d4e00;
+              --bad: #a40e26;
+          }
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+          margin: 0;
+          background: var(--bg);
+          color: var(--fg);
+          font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      header.site, footer.site, main {
+          max-width: 100ch;
+          margin: 0 auto;
+          padding: var(--pad);
+      }
+
+      h1 {
+          font-size: clamp(1.6rem, 4vw, 2.4rem);
+          line-height: 1.15;
+          margin: 0 0 0.25em;
+      }
+
+      h2 {
+          font-size: clamp(1.15rem, 2vw, 1.45rem);
+          margin: 1.8em 0 0.5em;
+      }
+
+      h3 { font-size: 1.02rem; margin: 0 0 0.4em; }
+
+      p { margin: 0.5em 0; }
+      ul { margin: 0.4em 0; padding-left: 1.2em; }
+      li { margin: 0.3em 0; }
+
+      .muted { color: var(--muted); }
+      .lede { font-size: 1.05rem; }
+
+      .grid {
+          display: grid;
+          gap: 1rem;
+          grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+          margin: 1rem 0;
+      }
+
+      .card {
+          background: var(--card);
+          padding: 1rem 1.1rem;
+          border-radius: var(--radius);
+          border: 1px solid var(--border);
+          min-width: 0;
+      }
+
+      code, kbd, samp, pre {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 0.9em;
+      }
+
+      code, kbd, samp {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+      }
+
+      pre {
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 0.7rem 0.9rem;
+          overflow-x: auto;
+          line-height: 1.45;
+          margin: 0.6em 0;
+      }
+
+      .card pre { border: 1px solid var(--border); background: var(--bg); }
+
+      a { color: var(--accent); }
+
+      :is(a, button, input, select, textarea, summary, [tabindex], [contenteditable]):focus-visible {
+          outline: 3px solid var(--ring);
+          outline-offset: 2px;
+          border-radius: 4px;
+      }
+
+      img, svg { max-width: 100%; height: auto; display: block; }
+
+      /* Status marks: color is ALWAYS paired with a symbol + word. */
+      .ok, .warn, .bad { font-weight: 600; white-space: nowrap; }
+      .ok { color: var(--ok); }
+      .warn { color: var(--warn); }
+      .bad { color: var(--bad); }
+
+      .tag {
+          display: inline-block;
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          padding: 0.05em 0.7em;
+          font-size: 0.82rem;
+          color: var(--muted);
+          margin-right: 0.35em;
+      }
+
+      .tablewrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--border); border-radius: var(--radius); }
+
+      table { border-collapse: collapse; width: 100%; min-width: 880px; }
+
+      caption {
+          text-align: left;
+          padding: 0.7rem 0.9rem 0.2rem;
+          color: var(--muted);
+          font-size: 0.9rem;
+      }
+
+      th, td {
+          text-align: left;
+          vertical-align: top;
+          padding: 0.55rem 0.75rem;
+          border-top: 1px solid var(--border);
+          font-size: 0.92rem;
+      }
+
+      thead th { background: var(--card); border-top: none; }
+      tbody th { font-weight: 600; white-space: nowrap; }
+
+      .timeline { list-style: none; padding-left: 0; }
+      .timeline li {
+          border-left: 3px solid var(--border);
+          padding: 0.15em 0 0.15em 0.9em;
+          margin: 0.45em 0;
+      }
+      .timeline .when { color: var(--muted); font-size: 0.88rem; display: block; }
+
+      @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+              animation-duration: 0.01ms !important;
+              animation-iteration-count: 1 !important;
+              transition-duration: 0.01ms !important;
+              scroll-behavior: auto !important;
+          }
+      }
+
+      @media print {
+          :root {
+              --bg: #fff;
+              --fg: #000;
+              --card: #fff;
+              --muted: #444;
+              --border: #999;
+              --accent: #003a80;
+              --ok: #005a20;
+              --warn: #6b4400;
+              --bad: #8f0018;
+              --ring: #6b4400;
+          }
+          .grid { grid-template-columns: 1fr !important; }
+          main, header.site, footer.site { max-width: 100% !important; padding: 1em !important; }
+          .tablewrap { overflow-x: visible; border: none; }
+          table { min-width: 0; font-size: 0.8rem; }
+          footer.site a::after { content: " (" attr(href) ")"; font-size: 0.85em; color: var(--muted); }
+      }
+  </style>
+</head>
+<body>
+<!-- <header>/<footer> are siblings of <main> so they retain banner/contentinfo roles. -->
+<header class="site">
+  <h1>Securing pytest's <code>tmp_path</code> base directory</h1>
+  <p class="muted lede">
+    Solution space for <a href="https://github.com/pytest-dev/pytest/issues/13669">issue #13669</a>
+    (CVE-2025-71176) — bridging the merged minimal fix (#14343) and the proposed comprehensive fix
+    (#14279). Design exploration for maintainer discussion; nothing here is implemented.
+  </p>
+</header>
+<main>
+
+  <section aria-labelledby="context">
+    <h2 id="context">Where things stand</h2>
+    <ul class="timeline">
+      <li><span class="when">2015</span>
+        <code>pytest-of-$USER</code> subdirectory introduced (#105) so the numbered-suffix scan doesn't
+        walk all of <code>/tmp</code>; renamed for version collisions (#894). Predictable base becomes a
+        deliberate UX feature.</li>
+      <li><span class="when">Aug 2025</span>
+        orlitzky reports symlink + TOCTOU attacks on the predictable name (<a
+        href="https://github.com/pytest-dev/pytest/issues/13669">#13669</a>); later assigned
+        CVE-2025-71176 / <a href="https://github.com/advisories/GHSA-6w46-j5rx-g56g">GHSA-6w46-j5rx-g56g</a>
+        (CVSS 3.1: 6.8 Medium; CWE-379, CWE-367).</li>
+      <li><span class="when">Mar 2026</span>
+        <a href="https://github.com/pytest-dev/pytest/pull/14279">PR #14279</a> (comprehensive:
+        <code>mkdtemp</code> random rootdir + fd-based hardening, ~580 additions) reviewed over several
+        rounds.</li>
+      <li><span class="when">Apr 2026</span>
+        <a href="https://github.com/pytest-dev/pytest/pull/14343">PR #14343</a> (minimal: ~30 lines,
+        no behavior change) merged instead and shipped in <strong>9.0.3</strong>; #14279 closed.
+        Advisory metadata says "fixed in 9.0.3".</li>
+      <li><span class="when">Jun 2026</span>
+        Dispute over "fixed" status; RonnyPfannschmidt's comparison table concedes the anti-pattern
+        remains and the comprehensive approach "may be worth revisiting in a future major release".
+        Bridge offer accepted as a discussion topic — "needs bikeshedding first, maybe at the pytest
+        sprint".</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="gaps">
+    <h2 id="gaps">Residual gaps after 9.0.3</h2>
+    <p>#14343 stats/chmods the rootdir with <code>follow_symlinks=False</code> and rejects a symlinked
+       rootdir outright. What it deliberately leaves open:</p>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="bad">✗ Open</span> · Squat DoS</h3>
+        <p>Any local user can pre-create <code>/tmp/pytest-of-&lt;victim&gt;</code>; the victim's runs
+           then fail the ownership check with an <code>OSError</code> they cannot fix themselves.
+           Acknowledged verbatim in the shipped code comment ("give the prankster a good scolding").</p>
+      </div>
+      <div class="card">
+        <h3><span class="warn">◐ Partial</span> · TOCTOU window</h3>
+        <p>Checks are path-based (<code>stat</code> → <code>S_ISLNK</code> → use), not fd-based. A race
+           between check and use is narrowed, not eliminated — vs. #14279's
+           <code>O_NOFOLLOW|O_DIRECTORY</code> + <code>fstat</code>/<code>fchmod</code> on a held fd.</p>
+      </div>
+      <div class="card">
+        <h3><span class="bad">✗ Open</span> · The anti-pattern itself</h3>
+        <p>A predictable name in world-writable <code>/tmp</code> remains the architecture. Every check
+           added is cataloguing "bad things someone might do" instead of removing the shared-parent
+           trust problem (orlitzky's core objection).</p>
+      </div>
+      <div class="card">
+        <h3><span class="warn">◐ Quiet edges</span> · Coverage asymmetries</h3>
+        <p>Where <code>os.supports_follow_symlinks</code> lacks support, the code silently falls back to
+           following symlinks. The <code>--basetemp</code> branch bypasses <em>all</em> hardening. Checks
+           are skipped entirely on Windows/Emscripten (mostly moot — see platform matrix below).</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="constraints">
+    <h2 id="constraints">Constraints any bridge proposal must satisfy</h2>
+    <p>Collected from maintainer feedback across #13669, #14279, and #14343 — these are the objections
+       that decided the outcome last time:</p>
+    <div class="grid">
+      <div class="card">
+        <h3>bluetech's four review objections</h3>
+        <ul>
+          <li>No warnings users can't act on (<code>avoids_symlink_attacks</code> case).</li>
+          <li>Don't duplicate <code>shutil.rmtree</code>'s own symlink refusal without justification.</li>
+          <li>Don't re-verify what <code>mkdtemp</code> already guarantees without justification.</li>
+          <li><strong>Never scan all of <code>/tmp</code> per cleanup</strong> — the subdirectory existed
+              precisely to bound that scan (2015, #105).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Retention &amp; discoverability (webknjaz, Ronny)</h3>
+        <ul>
+          <li>"Last N runs" retention (<code>tmp_path_retention_count</code>, default 3) needs a way to
+              find prior runs — pure randomness breaks GC.</li>
+          <li>Humans navigate to <code>/tmp/pytest-of-me/pytest-current</code>; that UX is an intentional
+              feature.</li>
+          <li>Ronny's stated unlock: <em>"if we provide a command to list/gc tmpdirs we are in a position
+              to use non-obvious dirnames and avoid subdirs."</em></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Compatibility budget</h3>
+        <ul>
+          <li>The template <code>{temproot}/pytest-of-{user}/pytest-{num}/{testname}/</code> is
+              <strong>documented public contract</strong> (tmp_path.rst); changing it needs a major
+              release + deprecation story.</li>
+          <li><code>pytest-current</code> symlinks, <code>.lock</code> files, and
+              <code>garbage-*</code> rename-then-delete are incidental (undocumented) — changeable, but
+              in-tree tests assert on some of them.</li>
+          <li>Breaking changes were the stated reason #14279 lost; "minimal until proven otherwise."</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Threat-model honesty</h3>
+        <ul>
+          <li>Defend the user from <em>other users</em>, not from themselves (bluetech's framing).</li>
+          <li>Multi-user is real: shared dev clusters, web hosts, CI multi-tenancy, low-privilege service
+              accounts (orlitzky, pgunn, The-Compiler).</li>
+          <li>But pytest is usually a dev tool on single-user boxes (Ronny) — proportionality matters, and
+              perfect is not on the menu.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="approaches">
+    <h2 id="approaches">The approaches, compared</h2>
+    <p>Marks pair a symbol with a word: <span class="ok">✓ closed</span> ·
+       <span class="warn">◐ partial</span> · <span class="bad">✗ open</span>.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Security and cost profile of each candidate. "A+E", "D+E" etc. compose — E is an
+          enabling layer, not a competitor.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Aspect</th>
+            <th scope="col">A · Harden in place<br /><span class="muted">fd-based checks + random fallback on squat</span></th>
+            <th scope="col">B · Flat random<br /><span class="muted">#14279: <code>pytest-of-user-XXXX/</code> per session</span></th>
+            <th scope="col">C · Nested random<br /><span class="muted">hardened parent / random session dirs</span></th>
+            <th scope="col">D · Relocate base<br /><span class="muted">XDG / user-private dir chain</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Symlink attack</th>
+            <td><span class="ok">✓ closed</span> (fd-based, no follow)</td>
+            <td><span class="ok">✓ closed</span> (mkdtemp, by construction)</td>
+            <td><span class="ok">✓ closed</span> (parent fd-verified + random children)</td>
+            <td><span class="ok">✓ closed</span> (no shared parent at all)</td>
+          </tr>
+          <tr>
+            <th scope="row">TOCTOU race</th>
+            <td><span class="ok">✓ closed</span> at rootdir (held fd)</td>
+            <td><span class="ok">✓ closed</span></td>
+            <td><span class="ok">✓ closed</span> (if parent ops use <code>dir_fd</code>)</td>
+            <td><span class="ok">✓ closed</span> (parent trusted by OS construction)</td>
+          </tr>
+          <tr>
+            <th scope="row">Squat DoS</th>
+            <td><span class="warn">◐ degraded</span> — squat detected → warn + fall back to <code>mkdtemp</code> rootdir; run proceeds</td>
+            <td><span class="ok">✓ closed</span></td>
+            <td><span class="warn">◐ parent squattable</span> — needs A's fallback to close</td>
+            <td><span class="ok">✓ closed</span> where a private base exists; fallback path inherits its own column</td>
+          </tr>
+          <tr>
+            <th scope="row">Predictable-name anti-pattern</th>
+            <td><span class="bad">✗ remains</span> (verified, but still shared-/tmp)</td>
+            <td><span class="ok">✓ removed</span></td>
+            <td><span class="warn">◐ parent remains</span></td>
+            <td><span class="ok">✓ removed</span> — predictable name becomes <em>safe</em> inside a user-owned base</td>
+          </tr>
+          <tr>
+            <th scope="row">Breaking change</th>
+            <td><span class="ok">✓ none</span> (fallback path only under attack)</td>
+            <td><span class="bad">✗ yes</span> — documented template, <code>pytest-current</code>, per-session layout</td>
+            <td><span class="warn">◐ moderate</span> — session dir names change; parent + nesting kept</td>
+            <td><span class="warn">◐ moderate</span> — location changes, structure can stay identical</td>
+          </tr>
+          <tr>
+            <th scope="row">Findability / UX</th>
+            <td><span class="ok">✓ unchanged</span></td>
+            <td><span class="bad">✗ needs help</span> — prefix + mtime sort, or E</td>
+            <td><span class="warn">◐ mostly kept</span> — grouping dir survives; numbered names don't</td>
+            <td><span class="ok">✓ kept</span> — stable, documentable per-platform path; <code>pytest-current</code> can stay</td>
+          </tr>
+          <tr>
+            <th scope="row">Retention / GC cost</th>
+            <td><span class="ok">✓ unchanged</span> (scoped scan)</td>
+            <td><span class="bad">✗ temproot scan</span> — bluetech's #4, unless E's registry</td>
+            <td><span class="ok">✓ scoped scan</span> inside parent</td>
+            <td><span class="ok">✓ scoped scan</span>; XDG_CACHE variant means pytest owns lifetime (it already does retention)</td>
+          </tr>
+          <tr>
+            <th scope="row">Complexity</th>
+            <td><span class="warn">◐ moderate</span> — fd plumbing + fallback branch</td>
+            <td><span class="warn">◐ large</span> — ~580 additions in #14279</td>
+            <td><span class="warn">◐ large</span> — everything in A plus layout migration</td>
+            <td><span class="warn">◐ moderate-large</span> — base-selection chain + per-platform docs</td>
+          </tr>
+          <tr>
+            <th scope="row">Champion / origin</th>
+            <td>bluetech's floor, extended; fallback idea bridges orlitzky's DoS point</td>
+            <td>orlitzky, #14279 (laurac8r); The-Compiler opt. 2</td>
+            <td>nicoddemus, The-Compiler opt. 3 (with his own caveat)</td>
+            <td>nirs (XDG_RUNTIME_DIR), The-Compiler opt. 4</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>A · Harden in place, degrade gracefully</h3>
+        <pre aria-label="Directory layout for approach A">/tmp/pytest-of-laura/          ← verified via O_NOFOLLOW fd
+  pytest-0/  pytest-1/  pytest-current@
+# under squat attack only:
+/tmp/pytest-of-laura-x7Qz3a/   ← mkdtemp fallback + warning</pre>
+        <ul>
+          <li>Open rootdir with <code>O_NOFOLLOW|O_DIRECTORY</code>, verify with <code>fstat</code>,
+              tighten with <code>fchmod</code>, resolve children via <code>dir_fd</code> — the TOCTOU
+              window closes because the fd pins the object.</li>
+          <li>The new move: on ownership failure, <strong>don't hard-fail</strong> — fall back to a
+              <code>mkdtemp</code>-random rootdir and warn. Converts the DoS into a degraded-but-working
+              run. Directly answers orlitzky's "I can't fix it!" scenario.</li>
+          <li>Ships in a 9.x minor; zero behavior change for unattacked users. Unix-only plumbing
+              (<code>dir_fd</code> unsupported on Windows) mirrors the existing
+              <code>supports_follow_symlinks</code> gating — and Windows was never exposed.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>B · Flat random per session (#14279's shape)</h3>
+        <pre aria-label="Directory layout for approach B">/tmp/pytest-of-laura-BorMuC/   ← session 1 (mkdtemp)
+/tmp/pytest-of-laura-6YmIOO/   ← session 2
+/tmp/pytest-of-laura-guESQy/   ← session 3</pre>
+        <ul>
+          <li>Strongest single-mechanism fix: nothing predictable to squat or symlink; battle-tested
+              <code>tempfile.mkdtemp</code> does the security work.</li>
+          <li>Costs are exactly the ones that killed #14279: documented-template break,
+              <code>pytest-current</code> gone, retention GC must scan the shared temproot (bluetech #4),
+              more <code>/tmp</code> noise (nicoddemus).</li>
+          <li>Viable only at a major release, and only with the discovery/GC gap answered — i.e., B
+              really means <strong>B+E</strong>.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>C · Hardened parent, random children</h3>
+        <pre aria-label="Directory layout for approach C">/tmp/pytest-of-laura/          ← still predictable (squattable)
+  pytest-1-N93sIT/  pytest-2-iKTFoY/  pytest-3-EUIRYH/</pre>
+        <ul>
+          <li>Keeps the grouping dir (GC scan stays scoped, <code>/tmp</code> stays tidy) and randomizes
+              session dirs beneath it.</li>
+          <li>Honest assessment: inside a <em>verified 0700 parent</em>, an attacker can't write —
+              so randomizing children adds little security beyond A. The parent squat (DoS) is untouched;
+              The-Compiler's own caveat ("same issue pushed a level down") applies whenever parent
+              verification is skipped or wrong.</li>
+          <li>Buys concurrency robustness (no numbered-suffix races under xdist/parallel sessions) more
+              than attacker resistance. Pay the layout break only if that's the goal.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>D · Move out of shared /tmp entirely</h3>
+        <pre aria-label="Directory layout for approach D">Linux:  $XDG_RUNTIME_DIR/pytest/pytest-0/   (0700, spec-guaranteed)
+   or:  $XDG_CACHE_HOME/pytest/tmp/pytest-0/ (durable; pytest GCs)
+macOS:  $TMPDIR → /var/folders/…/T/pytest-of-laura/   (already private)
+Win:    %LOCALAPPDATA%\Temp\pytest-of-laura\          (already private)
+else:   fall back to A (hardened /tmp scheme)</pre>
+        <ul>
+          <li>Dissolves the problem instead of defending it: predictable names are <em>safe</em> inside a
+              parent only the user can write. macOS/Windows already work this way — the vulnerability is
+              Unix-shared-<code>/tmp</code>-specific.</li>
+          <li><code>XDG_RUNTIME_DIR</code> caveats: tmpfs (RAM-backed, ~10% RAM cap) — risky for large
+              artifacts; 6-hour reaping rules; absent under cron, plain <code>su</code>, minimal
+              containers. <code>XDG_CACHE_HOME</code> flips the tradeoff: durable disk, always present,
+              but pytest owns cleanup (it already has retention) and NFS homes can hurt (locking, perf,
+              quotas).</li>
+          <li>Needs a precedence story (<code>--basetemp</code> › <code>PYTEST_DEBUG_TEMPROOT</code> ›
+              ini opt-in › platform default) and a deprecation cycle for the documented location — the
+              <em>structure</em> beneath can stay byte-identical.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>E · Discovery &amp; GC command — the enabling layer, not a competitor</h3>
+      <p><code>pytest --tmpdirs list</code> / <code>--tmpdirs gc</code> / <code>--tmpdirs latest</code>
+         (spelling negotiable), backed by a small per-user registry (e.g. under
+         <code>$XDG_STATE_HOME/pytest/</code>) recording recent rootdirs.</p>
+      <ul>
+        <li>Answers Ronny's condition verbatim: a list/gc command is what makes "non-obvious dirnames"
+            acceptable.</li>
+        <li>Answers webknjaz: retention reads the registry, not directory-name arithmetic — GC without
+            any shared-temproot scan (bluetech #4 resolved for B too).</li>
+        <li>Replaces <code>pytest-current</code> where symlinks are unsafe/absent (<code>--tmpdirs
+            latest</code> prints the path); keeps it where safe (inside D's private base).</li>
+        <li>Prior art for the pattern: <code>go clean -cache</code> + <code>go env GOCACHE</code> —
+            findable via a documented command rather than a guessable path.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section aria-labelledby="recommendation">
+    <h2 id="recommendation">Recommended bridge: stage it</h2>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="tag">Phase 1</span> 9.x minor — A + E groundwork</h3>
+        <ul>
+          <li>fd-based rootdir verification (close the TOCTOU residue) — no visible change.</li>
+          <li>Squat → warn + <code>mkdtemp</code> fallback (close the DoS as a felt problem) — visible
+              only under attack.</li>
+          <li>Introduce the registry + <code>--tmpdirs</code> command; document the threat model and the
+              <code>--basetemp</code> bypass asymmetry.</li>
+          <li>Each item answers a named objection without touching the documented path template —
+              "minimal until proven otherwise" is respected.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="tag">Phase 2</span> next major — D by default, B semantics as fallback</h3>
+        <ul>
+          <li>Per-platform private base (macOS/Windows: unchanged; Linux: XDG chain with an ini opt-out)
+              — keeps numbered dirs, retention, and <code>pytest-current</code> <em>because the parent is
+              now trustworthy</em>.</li>
+          <li>Where no private base exists (bare containers, exotic Unix), use mkdtemp-random rootdirs
+              in <code>/tmp</code> with registry-driven discovery/GC (B+E).</li>
+          <li>Deprecation cycle for the documented template; changelog + migration note for scripts that
+              hardcode <code>pytest-of-*</code> paths.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="muted">Why this split: Phase 1 is shippable without re-litigating UX (it changes nothing
+       visible), while Phase 2 preserves the UX everyone defended — predictable, navigable paths — by
+       relocating them somewhere predictability is harmless. The sprint discussion can accept, reorder,
+       or strike each line independently.</p>
+  </section>
+
+  <section aria-labelledby="practices">
+    <h2 id="practices">Best practices &amp; prior art worth citing</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Use the battle-tested primitive</h3>
+        <p><code>tempfile.mkdtemp</code> is atomic and race-free by construction; hand-rolled check
+           sequences must catalogue every attack (hardlinks-to-dirs are POSIX
+           implementation-defined; bind mounts defeat link counting). ssh-agent's
+           <code>/tmp/ssh-XXXXXXXXXX/</code> is the canonical shape. npm shipped the same predictable-name
+           bug as CVE-2013-4116.</p>
+      </div>
+      <div class="card">
+        <h3>Warnings must be actionable</h3>
+        <p>Both reviewers converged on this: don't warn about <code>avoids_symlink_attacks</code> when the
+           user can do nothing. Either bail out with a clear error, degrade with a stated consequence, or
+           stay silent and document.</p>
+      </div>
+      <div class="card">
+        <h3>Bound your scans</h3>
+        <p>The 2015 subdirectory (#105) exists because suffix-scanning all of <code>/tmp</code> hurt once.
+           Any design that reintroduces a shared-temproot scan per session will meet the same objection —
+           scope scans to an owned directory or replace them with a registry.</p>
+      </div>
+      <div class="card">
+        <h3>Defense-in-depth must earn its lines</h3>
+        <p>Re-verifying <code>mkdtemp</code> output or duplicating <code>shutil.rmtree</code>'s symlink
+           refusal reads as noise to reviewers unless each check names the concrete scenario it stops
+           (e.g. exotic umask/ACL → one unconditional <code>chmod 0700</code> is enough).</p>
+      </div>
+      <div class="card">
+        <h3>Platform matrix, stated up front</h3>
+        <p>The bug class exists only where a world-writable parent is shared: Linux/BSD
+           <code>/tmp</code>. macOS (<code>/var/folders</code>, 0700 per user) and Windows
+           (per-user <code>%TEMP%</code> ACLs) are structurally immune — so Unix-only hardening code
+           (<code>dir_fd</code>, <code>O_NOFOLLOW</code>) costs nothing where it's unavailable.</p>
+      </div>
+      <div class="card">
+        <h3>Advisory hygiene</h3>
+        <p>The GHSA says "fixed in 9.0.3" while the issue thread disputes it. Whatever the sprint decides,
+           feed the outcome back into the advisory (annotate residual DoS as accepted risk, or re-scope
+           the CVE) — the June friction came from that gap, not from the code.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="questions">
+    <h2 id="questions">Open questions for the sprint</h2>
+    <ul>
+      <li>Is the squat→fallback behavior (A) acceptable semantics, or should a squat still hard-fail
+          under a strict opt-in (<code>tmp_path_strict_ownership=true</code>)?</li>
+      <li>XDG_RUNTIME_DIR vs XDG_CACHE_HOME as the Linux Phase-2 default — RAM-backed ephemerality vs
+          durable disk that pytest must GC. (Large-artifact suites argue for CACHE.)</li>
+      <li>Where do XDG vars slot into precedence relative to <code>TMPDIR</code> and
+          <code>PYTEST_DEBUG_TEMPROOT</code>? Opt-in ini first, default flip later?</li>
+      <li>Does <code>--basetemp</code> get any hardening, or is "you asked for exactly this path"
+          documented as the contract?</li>
+      <li>Registry format/location for E — and does <code>pytest-current</code> survive as a symlink
+          inside private bases, or is <code>--tmpdirs latest</code> the sole replacement?</li>
+      <li>Backport stance: is Phase 1 (invisible hardening) backportable to 9.0.x, or does even that
+          wait?</li>
+    </ul>
+  </section>
+
+</main>
+<footer class="site muted">
+  <p>Sources: <a href="https://github.com/pytest-dev/pytest/issues/13669">issue #13669</a> ·
+     <a href="https://github.com/pytest-dev/pytest/pull/14279">PR #14279</a> ·
+     <a href="https://github.com/pytest-dev/pytest/pull/14343">PR #14343</a> ·
+     <a href="https://github.com/advisories/GHSA-6w46-j5rx-g56g">GHSA-6w46-j5rx-g56g</a> ·
+     <a href="https://www.openwall.com/lists/oss-security/2026/01/21/5">oss-security disclosure</a>.
+     Prepared 2026-07-03 as a discussion aid; no code changes are proposed here beyond sketches.</p>
+</footer>
+</body>
+</html>
