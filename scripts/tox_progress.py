@@ -69,7 +69,6 @@ class EnvState:
     errors: int = 0
     skipped: int = 0
     warnings: int = 0
-    current_test: str = ""
     elapsed: float = 0.0
     start_time: float = 0.0
     output_lines: list[str] = field(default_factory=list)
@@ -164,8 +163,10 @@ def build_cmd(env_name: str) -> list[str]:
 def parse_summary_line(line: str, state: EnvState) -> bool:
     """Parse the final summary line like '= 1234 passed, 5 failed in 45.2s ='."""
     clean = strip_ansi(line)
-    # pytest summary lines are delimited by '=' and end with 'in X.Xs ='
-    if not re.search(r"=.*\bin\s+[\d.]+s\s*=", clean):
+    # pytest summary lines are delimited by '=' and end with 'in X.Xs ='.
+    # Runs >= 60s add a ' (H:MM:SS)' suffix after the seconds token
+    # (format_session_duration), so tolerate an optional parenthetical.
+    if not re.search(r"=.*\bin\s+[\d.]+s(?:\s+\([^)]*\))?\s*=", clean):
         return False
     m_passed = re.search(r"(\d+) passed", clean)
     m_failed = re.search(r"(\d+) failed", clean)
@@ -222,6 +223,13 @@ def run_env(state: EnvState, semaphore: threading.Semaphore | None) -> None:
             state.output_lines.append(line)
             state.elapsed = time.time() - state.start_time
 
+            # Non-pytest envs (linting, docs, ...) run pre-commit/sphinx, not
+            # pytest. Their output can coincidentally match the pytest parsing
+            # patterns, so skip all of it — their pass/fail comes from the
+            # return code, and format_bar renders a spinner for them.
+            if not is_pytest_env:
+                continue
+
             # xdist: detect worker startup
             clean_check = strip_ansi(line)
             if "bringing up nodes" in clean_check:
@@ -249,12 +257,6 @@ def run_env(state: EnvState, semaphore: threading.Semaphore | None) -> None:
             # Track progress chars
             if state.status == "running" and not in_short_summary:
                 parse_progress_char(line, state)
-
-            # Track current file being tested
-            clean = strip_ansi(line)
-            m = re.match(r"^(testing/\S+\.py|doc/\S+\.py)", clean)
-            if m:
-                state.current_test = m.group(1)
 
         proc.wait()
         state.returncode = proc.returncode

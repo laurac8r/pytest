@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from tox_progress import build_cmd
 from tox_progress import EnvState
+from tox_progress import parse_progress_char
 from tox_progress import parse_summary_line
 from tox_progress import run_env
 from tox_progress import strip_ansi
@@ -50,6 +51,20 @@ class TestParseSummaryLine:
         assert state.passed == 50
         assert state.warnings == 3
 
+    def test_parses_summary_with_long_duration_suffix(self) -> None:
+        """Runs >= 60s get a ' (H:MM:SS)' suffix from pytest's
+        format_session_duration, so the seconds token is no longer directly
+        followed by '='. The parser must still match — full per-interpreter
+        suites (this script's primary workload) always exceed 60s."""
+        state = EnvState(name="py312")
+        result = parse_summary_line(
+            "= 100 passed, 5 failed, 10 skipped in 312.00s (0:05:12) =", state
+        )
+        assert result is True
+        assert state.passed == 100
+        assert state.failed == 5
+        assert state.skipped == 10
+
     def test_rejects_test_output_containing_passed(self) -> None:
         """Test output like 'assert 5 passed validation' should NOT be parsed as summary."""
         state = EnvState(name="py312")
@@ -65,6 +80,41 @@ class TestParseSummaryLine:
         )
         assert result is False
         assert state.failed == 0
+
+
+class TestParseProgressChar:
+    def test_counts_progress_chars_with_file_prefix_and_percent(self) -> None:
+        """Non-verbose pytest progress line: file prefix, char map, percent."""
+        state = EnvState(name="py312")
+        parse_progress_char("testing/test_x.py ...F.sxE  [ 45%]", state)
+        assert state.passed == 4  # four '.'
+        assert state.failed == 1  # one 'F'
+        assert state.skipped == 2  # 's' and 'x'
+        assert state.errors == 1  # one 'E'
+
+    def test_counts_xdist_prefixless_progress_line(self) -> None:
+        """Xdist emits the char map with no file prefix."""
+        state = EnvState(name="py312")
+        parse_progress_char("......x....  [ 66%]", state)
+        assert state.passed == 10
+        assert state.skipped == 1
+
+    def test_verbose_line_counts_single_outcome(self) -> None:
+        """Verbose mode reports one outcome word per line."""
+        state = EnvState(name="py312")
+        parse_progress_char("testing/test_x.py::test_a PASSED", state)
+        parse_progress_char("testing/test_x.py::test_b FAILED", state)
+        assert state.passed == 1
+        assert state.failed == 1
+
+    def test_ignores_non_progress_line(self) -> None:
+        """A prose line must not be miscounted as progress chars."""
+        state = EnvState(name="py312")
+        parse_progress_char("installing dependencies into the venv", state)
+        assert state.passed == 0
+        assert state.failed == 0
+        assert state.skipped == 0
+        assert state.errors == 0
 
 
 class TestRunEnvStdoutCheck:
@@ -234,3 +284,29 @@ class TestShortTestSummaryInfoGuard:
         with patch("tox_progress.subprocess.Popen", return_value=mock_proc):
             run_env(state, semaphore=None)
         assert state.failed == 1
+
+
+class TestNonPytestEnvNotParsed:
+    def test_non_pytest_env_output_does_not_touch_counters(self) -> None:
+        """Non-pytest envs (linting, docs, ...) run pre-commit/sphinx, not
+        pytest. Their output can contain strings that match the pytest
+        collection/progress/summary patterns (e.g. a diff line, a log message),
+        but those must never be parsed into test counts or flip the status —
+        pass/fail for these envs is driven solely by the process return code."""
+        state = EnvState(name="linting")
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(
+            [
+                "collected 999 items\n",
+                "testing/test_x.py .....F\n",
+                "= 102 passed, 5 failed in 3.2s =\n",
+            ]
+        )
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        with patch("tox_progress.subprocess.Popen", return_value=mock_proc):
+            run_env(state, semaphore=None)
+        assert state.total == 0
+        assert state.passed == 0
+        assert state.failed == 0
+        assert state.status == "passed"  # from returncode, not the parsed summary
